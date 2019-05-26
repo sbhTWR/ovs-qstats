@@ -1,1 +1,1 @@
-OK
+Patch for Open vSwitch to enable default queueing discipline stats support (patch is a work-around for the "no-reply" bug for RTM_GETQDISC netlink request). Patch also enables queue length statistic in the queue stats.
