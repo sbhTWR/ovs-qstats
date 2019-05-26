@@ -1,0 +1,160 @@
+AHP
+TOPSIS
+southhampton sdn
+OpenVSwitch dicussion on SDN
+linux htb scheduler
+DITG Traffic generator
+
+1. create queues 
+2. verify created or not? command for number of created queues.
+3. 0th queue is always default, configure queue 1. 
+4. divide bandwidth amongst queues.
+5. min_rate / max_rate which ones actually ensures the specified bandwidth.
+6. sending different flows through different queues. mention queues in flow entries.
+7. take stats of queues, flow stats, port stats, write 
+
+sudo ovs-vsctl -- set Port s1-eth1 qos=@newqos -- set Port s1-eth2 qos=@newqos -- --id=@newqos create QoS type=linux-htb other-config:max-rate=1000000000 queues=0=@q0,1=@q1 -- --id=@q0 create Queue other-config:min-rate=100000000 other-config:max-rate=1000000000 -- --id=@q1 create Queue other-config:min-rate=500000000
+
+ovs-vsctl -- set Port s1-eth1 qos=@newqos \
+      -- --id=@newqos create QoS type=linux-htb other-config:max-rate=250 queues=0=@q0 \
+      -- --id=@q0 create Queue other-config:max-rate=250 
+
+ovs-vsctl -- set Port s1-eth2 qos=@newqos \
+      -- --id=@newqos create QoS type=linux-htb other-config:max-rate=250 queues=1=@q1 \
+      -- --id=@q1 create Queue other-config:max-rate = 250 
+
+ Ovs - vsctl -- set Port s1 - eth3 qos=@defaultqos \
+     -- -- id=@defaultqos create QoS type=linux-htb other-config:max-rate=300000000 queues=1=@q1 \
+      -- -- id=@q1 create Queue other-config:min-rate=5000000 other-config:max-rate=200000000
+
+delay
+jitter
+bandwidth
+
+Queue stats: 
+sudo ovs-ofctl queue-stats s1 1 -O Openflow13
+sudo ovs-ofctl queue-stats s1 2 -O Openflow13
+Install the following flows:
+sudo ovs-ofctl -O OpenFlow13 add-flow s1 in_port=1,tcp,tp_src=9935,actions=set_queue:1,output:2  
+sudo ovs-ofctl -O OpenFlow13 add-flow s1 in_port=1,udp,tp_src=9936,actions=set_queue:2,output:2
+
+sudo ovs-ofctl -O OpenFlow13 add-flow s1 in_port=1,icmp,icmp_type=8,icmp_code=0,actions=set_queue:3,output:2
+sudo ovs-ofctl -O OpenFlow13 add-flow s1 in_port=1,icmp,icmp_type=0,icmp_code=0,actions=set_queue:3,output:2 
+
+sudo ovs-ofctl -O OpenFlow13 add-flow s1 in_port=2,icmp,icmp_type=8,icmp_code=0,actions=set_queue:3,output:1 
+sudo ovs-ofctl -O OpenFlow13 add-flow s1 in_port=2,icmp,icmp_type=0,icmp_code=0,actions=set_queue:3,output:1 
+
+With IP: #############################################################################################################
+sudo ovs-ofctl -O OpenFlow13 add-flow s1 in_port=1,icmp,nw_src=10.0.0.1,nw_dst=10.0.0.2,actions=set_queue:3,output:2
+sudo ovs-ofctl -O OpenFlow13 add-flow s1 in_port=2,icmp,nw_src=10.0.0.2,nw_dst=10.0.0.1,actions=set_queue:3,output:1
+
+sudo ovs-ofctl -O OpenFlow13 add-flow s1 in_port=1,tcp,nw_src=10.0.0.1,nw_dst=10.0.0.2,actions=set_queue:1,output:2
+sudo ovs-ofctl -O OpenFlow13 add-flow s1 in_port=2,tcp,nw_src=10.0.0.2,nw_dst=10.0.0.1,actions=set_queue:1,output:1
+
+sudo ovs-ofctl -O OpenFlow13 add-flow s1 in_port=1,udp,nw_src=10.0.0.1,nw_dst=10.0.0.2,actions=set_queue:2,output:2
+sudo ovs-ofctl -O OpenFlow13 add-flow s1 in_port=2,udp,nw_src=10.0.0.2,nw_dst=10.0.0.1,actions=set_queue:2,output:1
+
+sudo ovs-ofctl -O OpenFlow13 add-flow s1 in_port=2,dl_type=0x0806,actions=set_queue:0,output:1
+sudo ovs-ofctl -O OpenFlow13 add-flow s1 in_port=1,dl_type=0x0806,actions=set_queue:0,output:2
+######################################################################################################################
+sudo ovs-ofctl -O OpenFlow13 add-flow s1 in_port=1,icmp,nw_src=10.0.0.1,nw_dst=10.0.0.2,actions=set_queue:0,output:2
+sudo ovs-ofctl -O OpenFlow13 add-flow s1 in_port=2,icmp,nw_src=10.0.0.2,nw_dst=10.0.0.1,actions=set_queue:0,output:1
+
+sudo ovs-ofctl -O OpenFlow13 add-flow s1 in_port=1,tcp,nw_src=10.0.0.1,nw_dst=10.0.0.2,actions=set_queue:1,output:2
+sudo ovs-ofctl -O OpenFlow13 add-flow s1 in_port=2,tcp,nw_src=10.0.0.2,nw_dst=10.0.0.1,actions=set_queue:1,output:1
+
+sudo ovs-ofctl -O OpenFlow13 add-flow s1 in_port=1,udp,nw_src=10.0.0.1,nw_dst=10.0.0.2,actions=set_queue:1,output:2
+sudo ovs-ofctl -O OpenFlow13 add-flow s1 in_port=2,udp,nw_src=10.0.0.2,nw_dst=10.0.0.1,actions=set_queue:1,output:1
+
+sudo ovs-ofctl -O OpenFlow13 add-flow s1 in_port=2,dl_type=0x0806,actions=set_queue:0,output:1
+sudo ovs-ofctl -O OpenFlow13 add-flow s1 in_port=1,dl_type=0x0806,actions=set_queue:0,output:2
+######################################################################################################################
+
+---TRIVIAL ERROR! -- Dont forget ARP flow entries!!!
+sudo ovs-ofctl -O OpenFlow13 add-flow s1 in_port=2,dl_type=0x0806,actions=set_queue:0,output:1
+sudo ovs-ofctl -O OpenFlow13 add-flow s1 in_port=1,dl_type=0x0806,actions=set_queue:0,output:2
+
+sudo ovs-ofctl -O OpenFlow13 add-flow s1 in_port=1,tcp,nw_src=10.0.0.1,nw_dst=10.0.0.2,actions=set_queue:1,output:2  
+
+Queues will be installed by script
+Run D-ITG in following manner:
+./ITGSend -T TCP  -a 10.0.0.2 -c 500 -C 40 -t 15000 -l sender1.log -x recv1.log 
+./ITGSend -T UDP  -a 10.0.0.2 -c 700 -C 100 -t 15000 -l sender2.log -x recv2.log
+./ITGSend -T ICMP -a 10.0.0.2 -c 700 -C 100 -t 15000 -l sender3.log -x recv3.log   
+
+./ITGSend -T TCP  -a 10.0.0.2 -c 100 -C 25 -t 15000 -l sender1.log -x recv1.log 
+./ITGSend -T UDP  -a 10.0.0.2 -c 875 -C 100 -t 15000 -l sender2.log -x recv2.log
+./ITGSend -T ICMP -a 10.0.0.2 -c 875 -C 100 -t 15000 -l sender3.log -x recv3.log             
+=====================================================================================================================
+######### Delay through LLDP packet (FOR TESTING DELAY) ##############
+
+sudo ovs-ofctl -O OpenFlow13 add-flow s1 in_port=1,icmp,nw_src=10.0.0.1,nw_dst=10.0.0.2,actions=set_queue:3,output:2
+sudo ovs-ofctl -O OpenFlow13 add-flow s1 in_port=2,icmp,nw_src=10.0.0.2,nw_dst=10.0.0.1,actions=set_queue:3,output:1
+
+sudo ovs-ofctl -O OpenFlow13 add-flow s1 in_port=1,tcp,nw_src=10.0.0.1,nw_dst=10.0.0.2,actions=set_queue:1,output:2
+sudo ovs-ofctl -O OpenFlow13 add-flow s1 in_port=2,tcp,nw_src=10.0.0.2,nw_dst=10.0.0.1,actions=set_queue:1,output:1
+
+sudo ovs-ofctl -O OpenFlow13 add-flow s1 in_port=1,udp,nw_src=10.0.0.1,nw_dst=10.0.0.2,actions=set_queue:2,output:2
+sudo ovs-ofctl -O OpenFlow13 add-flow s1 in_port=2,udp,nw_src=10.0.0.2,nw_dst=10.0.0.1,actions=set_queue:2,output:1
+
+sudo ovs-ofctl -O OpenFlow13 add-flow s1 in_port=2,dl_type=0x0806,actions=set_queue:0,output:1
+sudo ovs-ofctl -O OpenFlow13 add-flow s1 in_port=1,dl_type=0x0806,actions=set_queue:0,output:2
+
+sudo ovs-ofctl -O OpenFlow13 add-flow s2 in_port=1,icmp,nw_src=10.0.0.1,nw_dst=10.0.0.2,actions=set_queue:3,output:2
+sudo ovs-ofctl -O OpenFlow13 add-flow s2 in_port=2,icmp,nw_src=10.0.0.2,nw_dst=10.0.0.1,actions=set_queue:3,output:1
+
+sudo ovs-ofctl -O OpenFlow13 add-flow s2 in_port=1,tcp,nw_src=10.0.0.1,nw_dst=10.0.0.2,actions=set_queue:1,output:2
+sudo ovs-ofctl -O OpenFlow13 add-flow s2 in_port=2,tcp,nw_src=10.0.0.2,nw_dst=10.0.0.1,actions=set_queue:1,output:1
+
+sudo ovs-ofctl -O OpenFlow13 add-flow s2 in_port=1,udp,nw_src=10.0.0.1,nw_dst=10.0.0.2,actions=set_queue:2,output:2
+sudo ovs-ofctl -O OpenFlow13 add-flow s2 in_port=2,udp,nw_src=10.0.0.2,nw_dst=10.0.0.1,actions=set_queue:2,output:1
+
+sudo ovs-ofctl -O OpenFlow13 add-flow s2 in_port=2,dl_type=0x0806,actions=set_queue:0,output:1
+sudo ovs-ofctl -O OpenFlow13 add-flow s2 in_port=1,dl_type=0x0806,actions=set_queue:0,output:2
+
+sudo mn --custom sf_mn_scripts/topo.py --topo=MyTopo --controller remote
+sudo ovs-vsctl set Bridge s1 protocols=OpenFlow13
+sudo ovs-vsctl set Bridge s2 protocols=OpenFlow13
+
+
+
+s1: when an LLDP packet is sent from the controller, output it through queue:3, port2
+    when an LLDP packet is recieved from port2, send it to the controller
+s2: when an LLDP packet is sent from the controller, output it through queue3, port1
+    when an LLDP packet is recieved from port1, send it to the controller
+
+
+sudo ovs-ofctl -O OpenFlow13 add-flow s1 in_port=2,dl_type=0x88CC,actions=CONTROLLER:6653
+sudo ovs-ofctl -O OpenFlow13 add-flow s2 in_port=1,dl_type=0x88CC,actions=CONTROLLER:6653
+
+################################################################################################
+CLEAR THE QUEUES
+#################################################################################################
+sudo ovs-vsctl clear Port s1-eth1 qos
+sudo ovs-vsctl clear Port s1-eth2 qos
+sudo ovs-vsctl clear Port s2-eth1 qos
+sudo ovs-vsctl clear Port s2-eth2 qos
+sudo ovs-vsctl --all destroy qos
+sudo ovs-vsctl --all destroy queue
+sudo ovs-vsctl list queue
+#################################################################################################
+# Modify switches.py
+1. #914 actions = [dp.ofproto_parser.OFPActionSetQueue(3),dp.ofproto_parser.OFPActionOutput(port.port_no)] [TODO: #Later, do it for all three queues]
+
+2.
+
+sudo ovs-ofctl -O OpenFlow13 add-flow s1 in_port=1,nw_src=10.0.0.1,nw_dst=10.0.0.2,actions=output:2
+sudo ovs-ofctl -O OpenFlow13 add-flow s1 in_port=2,nw_src=10.0.0.2,nw_dst=10.0.0.1,actions=output:1 
+sudo ovs-ofctl -O OpenFlow13 add-flow s2 in_port=1,nw_src=10.0.0.1,nw_dst=10.0.0.2,actions=output:2
+sudo ovs-ofctl -O OpenFlow13 add-flow s2 in_port=2,nw_src=10.0.0.2,nw_dst=10.0.0.1,actions=output:1 
+
+### REadme ###
+
+ps -e | grep <ovs-vswitchd>
+On Linux, the symlink /proc/<pid>/exe has the path of the executable. Use the command readlink -f /proc/<pid>/exe to get the value.
+For the love of god, befriend gdb. If you think your issues originate in the userland code, run ps -e | grep ovs-vswitchd to get the pid, hook in with sudo gdb ovs-vswitchd <pid> and have fun.
+
+
+
+
+
