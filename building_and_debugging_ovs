@@ -1,0 +1,125 @@
+./boot.sh required if pulled directly from github repo
+
+STEP 1: Configure according to the following options: 
+
+############## NOTE ##############
+Sometimes virtual box doesn't allow symlinks on shared directories. If you are setting up ovs through a shared directory, you need to configure
+virtual box to support symlinks on shared directories. To do so execute the following command on the host machine and restart the vm:
+
+VBoxManage setextradata VM_NAME VBoxInternal2/SharedFoldersEnableSymlinksCreate/SHARE_NAME 1
+
+where SHARE_NAME is the name of the shared directory on the host machine. For example in the guest machine, name would be sf_<SHAREDNAME>, then on the host machine it is <SHARENAME>
+##################################
+ 
+./configure CCFLAGS="-g" --prefix=/usr --localstatedir=/var --sysconfdir=/etc --with-linux=/lib/modules/$(uname -r)/build --enable-Werror
+
+STEP 2: 
+(in the build directory: )
+
+$ make
+
+STEP 3: 
+sudo make install
+sudo make modules_install
+
+STEP 4:
+sudo su
+config_file="/etc/depmod.d/openvswitch.conf"
+for module in datapath/linux/*.ko; do
+  modname="$(basename ${module})"
+  echo "override ${modname%.ko} * extra" >> "$config_file"
+  echo "override ${modname%.ko} * weak-updates" >> "$config_file"
+  done
+depmod -a
+
+STEP 5: 
+Load kernel modules:
+/sbin/modprobe openvswitch
+
+Verify that it was loaded:
+/sbin/lsmod | grep openvswitch
+
+openvswitch should be listed.
+
+STEP 6:
+List all the currently installed version of openvswitch and uninstall them:
+sudo dpkg -l | grep -i vswitch
+
+sudo dpkg --purge openvswitch-controller
+sudo dpkg --purge openvswitch-pki
+sudo dpkg --purge openvswitch-switch
+
+ps -e | grep ovs-vswitchd
+kill -9 <pid>
+
+STEP 7: 
+export PATH=$PATH:/usr/share/openvswitch/scripts <-- CAREFUL with the script location!
+							depends on how you ./configured the installation 
+							earlier. For example by default, an extra /local/ 
+							is included in the location.
+
+ovs-ctl start
+
+
+STEP 7: 
+sudo mkdir -p /etc/openvswitch
+sudo ovsdb-tool create /etc/openvswitch/conf.db \
+    vswitchd/vswitch.ovsschema
+
+STEP 8:
+mkdir -p /var/run/openvswitch
+
+sudo ovsdb-server --remote=punix:/var/run/openvswitch/db.sock     --remote=db:Open_vSwitch,Open_vSwitch,manager_options     --private-key=db:Open_vSwitch,SSL,private_key     --certificate=db:Open_vSwitch,SSL,certificate     --bootstrap-ca-cert=db:Open_vSwitch,SSL,ca_cert     --pidfile --detach --log-file
+
+
+STEP 9: initialize database using ovs-vsctl for the first time, though running it any time is harmless:
+sudo ovs-vsctl --no-wait init
+
+STEP 10: Start main Open vSwitch daemon, telling it to connect to the same Unix domain socket.
+sudo ovs-vswitchd --pidfile --detach --log-file
+
+### DEBUGGING OVS ###
+
+-> Get the processid by the following way: 
+ps -e | grep ovs-vswitchd
+-> attach gdb to the process:
+sudo gdb ovs-vswitchd <pid>
+
+### USEFUL GDB COMMANDS ###
+c - continue
+ctrl + C - interrupt and drop to gdb cli
+br <function name> - set breakpoint
+info br - list breakpoints
+delete <br number> - delete a specific break point with number listed in info br
+p *ptr - dereference and print a pointer
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
