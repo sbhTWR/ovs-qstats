@@ -1,0 +1,306 @@
+diff --git a/include/openflow/openflow-1.1.h b/include/openflow/openflow-1.1.h
+index a29db8f..d0b262f 100644
+--- a/include/openflow/openflow-1.1.h
++++ b/include/openflow/openflow-1.1.h
+@@ -520,8 +520,10 @@ struct ofp11_queue_stats {
+     ovs_be64 tx_bytes;         /* Number of transmitted bytes. */
+     ovs_be64 tx_packets;       /* Number of transmitted packets. */
+     ovs_be64 tx_errors;        /* # of packets dropped due to overrun. */
++    ovs_be64 qlen;             /* @Shubham Tiwari - qlen parameter */ 
+ };
+-OFP_ASSERT(sizeof(struct ofp11_queue_stats) == 32);
++/* OFP_ASSERT(sizeof(struct ofp11_queue_stats) == 32); */
++OFP_ASSERT(sizeof(struct ofp11_queue_stats) == 40);  /* @Shubham Tiwari - 8 bytes added due to qlen */
+ 
+ struct ofp11_group_stats_request {
+     ovs_be32 group_id;         /* All groups if OFPG_ALL. */
+diff --git a/include/openflow/openflow-1.3.h b/include/openflow/openflow-1.3.h
+index c48a8ea..23093b1 100644
+--- a/include/openflow/openflow-1.3.h
++++ b/include/openflow/openflow-1.3.h
+@@ -301,7 +301,8 @@ struct ofp13_queue_stats {
+     ovs_be32 duration_nsec;   /* Time queue has been alive in nanoseconds
+                                  beyond duration_sec. */
+ };
+-OFP_ASSERT(sizeof(struct ofp13_queue_stats) == 40);
++/* OFP_ASSERT(sizeof(struct ofp13_queue_stats) == 40); */
++OFP_ASSERT(sizeof(struct ofp13_queue_stats) == 48); /* @Shubham TIwari - add 8 for qlen */
+ 
+ /* Body of reply to OFPMP13_GROUP request */
+ struct ofp13_group_stats {
+diff --git a/include/openflow/openflow-1.4.h b/include/openflow/openflow-1.4.h
+index 9399950..ae16704 100644
+--- a/include/openflow/openflow-1.4.h
++++ b/include/openflow/openflow-1.4.h
+@@ -230,7 +230,8 @@ struct ofp14_queue_stats {
+     struct ofp13_queue_stats qs;
+     /* Followed by 0 or more properties (none yet defined). */
+ };
+-OFP_ASSERT(sizeof(struct ofp14_queue_stats) == 48);
++/* OFP_ASSERT(sizeof(struct ofp14_queue_stats) == 48); */
++OFP_ASSERT(sizeof(struct ofp14_queue_stats) == 56); /* @Shubham TIwari - add 8 for qlen */ 
+ 
+ 
+ /* ## ---------------- ## */
+diff --git a/include/openvswitch/ofp-queue.h b/include/openvswitch/ofp-queue.h
+index 51b98cd..da275c0 100644
+--- a/include/openvswitch/ofp-queue.h
++++ b/include/openvswitch/ofp-queue.h
+@@ -71,6 +71,8 @@ struct ofputil_queue_stats {
+     uint64_t tx_bytes;
+     uint64_t tx_packets;
+     uint64_t tx_errors;
++    /* @Shubham Tiwari - qlen parameter */
++    uint64_t qlen;
+ 
+     /* UINT32_MAX if unknown. */
+     uint32_t duration_sec;
+diff --git a/lib/netdev-linux.c b/lib/netdev-linux.c
+index 0a6c52d..3739ab6 100644
+--- a/lib/netdev-linux.c
++++ b/lib/netdev-linux.c
+@@ -478,6 +478,11 @@ static void tc_fill_rate(struct tc_ratespec *rate, uint64_t bps, int mtu);
+ static void tc_put_rtab(struct ofpbuf *, uint16_t type,
+                         const struct tc_ratespec *rate);
+ static int tc_calc_buffer(unsigned int Bps, int mtu, uint64_t burst_bytes);
++
++static int 
++default_qdisc_dump_stats(const struct netdev *netdev OVS_UNUSED, 
++                         const struct ofpbuf *nlmsg, 
++                         netdev_dump_queue_stats_cb *cb, void *aux); /* @Shubham Tiwari */
+ 
+ struct netdev_linux {
+     struct netdev up;
+@@ -2684,8 +2689,9 @@ start_queue_dump(const struct netdev *netdev, struct queue_dump_state *state)
+ {
+     struct ofpbuf request;
+     struct tcmsg *tcmsg;
+-
++    
+     tcmsg = netdev_linux_tc_make_request(netdev, RTM_GETTCLASS, 0, &request);
++    
+     if (!tcmsg) {
+         return false;
+     }
+@@ -2808,6 +2814,8 @@ netdev_linux_dump_queue_stats(const struct netdev *netdev_,
+ 
+         if (!netdev->tc->ops->class_dump_stats) {
+             error = EOPNOTSUPP;
++        } else if (strcmp(netdev->tc->ops->ovs_name, "")==0) {
++            netdev->tc->ops->class_dump_stats(netdev_, NULL, cb, aux);
+         } else if (!start_queue_dump(netdev_, &state)) {
+             error = ENODEV;
+         } else {
+@@ -4308,7 +4316,8 @@ htb_class_dump_stats(const struct netdev *netdev OVS_UNUSED,
+ 
+     major = tc_get_major(handle);
+     minor = tc_get_minor(handle);
+-    if (major == 1 && minor > 0 && minor <= HTB_N_QUEUES) {
++    /* Shubham Tiwari - changed here */
++    if ( major == 1 && minor > 0 && minor <= HTB_N_QUEUES ) {
+         (*cb)(minor - 1, &stats, aux);
+     }
+     return 0;
+@@ -4890,10 +4899,141 @@ default_tc_load(struct netdev *netdev, struct ofpbuf *nlmsg OVS_UNUSED)
+     return 0;
+ }
+ 
++/*
++ * Author: Shubham Tiwari - support for qdisc stats
++ */ 
++
++static int 
++default_qdisc_dump_stats(const struct netdev *netdev OVS_UNUSED, 
++                         const struct ofpbuf *nlmsg, 
++                         netdev_dump_queue_stats_cb *cb, void *aux) {
++
++    /* cast netdev into netdev_linux to obtain all the info */
++    /* struct netdev_linux *netdev_ = netdev_linux_cast(netdev); */
++
++    if (nlmsg!=NULL) {
++        /* Do nothing, place holder */
++    }
++    struct ofpbuf request, qdisc;
++
++    /* const struct tc_ops *ops; */
++    struct tcmsg *tcmsg;
++    struct netdev_queue_stats stats;
++    /* unsigned int handle, major, minor; */
++    /* int error, parse_error; */ 
++
++    /* TODO: parse stats and make a callback
++       https://mail.openvswitch.org/pipermail/ovs-dev/2015-March/295937.html
++       NLM_F_REQUEST flag on RTM_GETQDISC returns no reply from kernel (bug).
++       A workaround is to use the flag NLM_F_DUMP, which dumps all the qdiscs.
++       We then need to filter out the qdisc for the interface that we need. 
++    
++       One way is to use netdev->name and compare
++       it with the port in the reply, and make a callback
++       with only the relevent reply.
++    */
++
++    tcmsg = netdev_linux_tc_make_request(netdev, RTM_GETQDISC, NLM_F_DUMP,
++                                         &request);
++
++    /* 
++     * Important, switches themselves also have struct netdev allocated to them.
++     * While looping through ports, struct netdev of the switch with netdev->name ="s1"
++     * for example, also gets looped through (for some reason ovs developers included 
++     * that as a port!). That situation has to be avoided, since it results no reply
++     * while transaction, and ultimately segmentation fault (!). 
++     */      
++
++    if (!tcmsg) {
++        return ENODEV;
++    }                                                                     
++
++    tcmsg->tcm_parent = 0;
++    /* tc_transact(&request, &qdisc); */
++    /* Iterate the through the messages using dumps */
++    struct queue_dump_state state_;
++    struct queue_dump_state *state = &state_;
++    nl_dump_start(&state->dump, NETLINK_ROUTE, &request);
++    ofpbuf_uninit(&request);
++    ofpbuf_init(&state->buf, NL_DUMP_BUFSIZE);
++
++    while (nl_dump_next(&state_.dump, &qdisc, &state_.buf)) {
++        /* Parse the message */
++        /* Parse the stats in buffer qdisc */
++
++        /* Determine the ifindex and match it with netdev */
++        int ifindex;
++        int error;
++
++        error = get_ifindex(netdev, &ifindex);
++        if (error) {
++            return -1;
++        }
++        struct tcmsg *tc = ofpbuf_at_assert(&qdisc, NLMSG_HDRLEN, sizeof *tc);
++        if (tc->tcm_ifindex != ifindex)
++            continue;
++
++        static const struct nl_policy tca_policy[] = {
++            [TCA_OPTIONS] = { .type = NL_A_NESTED, .optional = false },
++            [TCA_STATS2] = { .type = NL_A_NESTED, .optional = false },
++        };
++
++        struct nlattr *ta[ARRAY_SIZE(tca_policy)];
++
++        if (!nl_policy_parse(&qdisc, NLMSG_HDRLEN + sizeof(struct tcmsg),
++                            tca_policy, ta, ARRAY_SIZE(ta))) {
++            VLOG_WARN_RL(&rl, "failed to parse qdisc message");
++            goto error;
++        }
++
++        const struct gnet_stats_queue *gsq;
++        struct gnet_stats_basic gsb;
++
++        static const struct nl_policy stats_policy[] = {
++            [TCA_STATS_BASIC] = { .type = NL_A_UNSPEC, .optional = false,
++                                    .min_len = sizeof gsb },
++            [TCA_STATS_QUEUE] = { .type = NL_A_UNSPEC, .optional = false,
++                                    .min_len = sizeof *gsq },
++        };
++        struct nlattr *sa[ARRAY_SIZE(stats_policy)];
++
++        if (!nl_parse_nested(ta[TCA_STATS2], stats_policy,
++                                sa, ARRAY_SIZE(sa))) {
++            VLOG_WARN_RL(&rl, "failed to parse class stats");
++            goto error; 
++        }
++
++        /* Alignment issues screw up the length of struct gnet_stats_basic on
++            * some arch/bitsize combinations.  Newer versions of Linux have a
++            * struct gnet_stats_basic_packed, but we can't depend on that.  The
++            * easiest thing to do is just to make a copy. */
++        memset(&gsb, 0, sizeof gsb);
++        memcpy(&gsb, nl_attr_get(sa[TCA_STATS_BASIC]),
++                MIN(nl_attr_get_size(sa[TCA_STATS_BASIC]), sizeof gsb));
++        stats.tx_bytes = gsb.bytes;
++        stats.tx_packets = gsb.packets;
++
++        gsq = nl_attr_get(sa[TCA_STATS_QUEUE]);
++        stats.tx_errors = gsq->drops;
++        stats.qlen = gsq->qlen;
++        stats.created = 0;
++        /* Make callback */
++        (*cb)(0, &stats, aux);
++    }
++
++    finish_queue_dump(&state_);
++    return 1;
++
++    error:
++    return -1;
++}
++
+ static const struct tc_ops tc_ops_default = {
+     .ovs_name = "",                         /* ovs_name */
+     .tc_install = default_tc_install,
+     .tc_load = default_tc_load,
++    .n_queues = 5,
++    .class_dump_stats = default_qdisc_dump_stats,
+ };
+ 
+ /* "linux-other" traffic control class.
+@@ -5237,6 +5377,7 @@ tc_parse_class(const struct ofpbuf *msg, unsigned int *handlep,
+ 
+         gsq = nl_attr_get(sa[TCA_STATS_QUEUE]);
+         stats->tx_errors = gsq->drops;
++        stats->qlen = gsq->qlen; /* @Shubham Tiwari - add qlen */
+     }
+ 
+     return 0;
+diff --git a/lib/netdev.h b/lib/netdev.h
+index d94817f..a627cf0 100644
+--- a/lib/netdev.h
++++ b/lib/netdev.h
+@@ -336,6 +336,8 @@ struct netdev_queue_stats {
+     uint64_t tx_bytes;
+     uint64_t tx_packets;
+     uint64_t tx_errors;
++    /* @Shubham Tiwari - qlen parameter */
++    uint64_t qlen;
+ 
+     /* Time at which the queue was created, in msecs, LLONG_MIN if unknown. */
+     long long int created;
+diff --git a/lib/ofp-queue.c b/lib/ofp-queue.c
+index 1c93987..9be8b4d 100644
+--- a/lib/ofp-queue.c
++++ b/lib/ofp-queue.c
+@@ -677,6 +677,7 @@ ofputil_queue_stats_from_ofp11(struct ofputil_queue_stats *oqs,
+     oqs->tx_bytes = ntohll(qs11->tx_bytes);
+     oqs->tx_packets = ntohll(qs11->tx_packets);
+     oqs->tx_errors = ntohll(qs11->tx_errors);
++    oqs->qlen = ntohll(qs11->qlen); /* @Shubham Tiwari - added qlen */
+     oqs->duration_sec = oqs->duration_nsec = UINT32_MAX;
+ 
+     return 0;
+@@ -799,6 +800,7 @@ ofputil_queue_stats_to_ofp11(const struct ofputil_queue_stats *oqs,
+     qs11->tx_bytes = htonll(oqs->tx_bytes);
+     qs11->tx_packets = htonll(oqs->tx_packets);
+     qs11->tx_errors = htonll(oqs->tx_errors);
++    qs11->qlen = htonll(oqs->qlen); /* @Shubham Tiwari - added qlen */
+ }
+ 
+ static void
+@@ -911,6 +913,7 @@ ofputil_queue_stats_reply_format(struct ds *string,
+         print_queue_stat(string, "bytes=", qs.tx_bytes, 1);
+         print_queue_stat(string, "pkts=", qs.tx_packets, 1);
+         print_queue_stat(string, "errors=", qs.tx_errors, 1);
++        print_queue_stat(string, "qlen=", qs.qlen, 1); /* @Shubham Tiwari - added qlen */
+ 
+         ds_put_cstr(string, "duration=");
+         if (qs.duration_sec != UINT32_MAX) {
+diff --git a/ofproto/ofproto.c b/ofproto/ofproto.c
+index 994e89d..c2d86f9 100644
+--- a/ofproto/ofproto.c
++++ b/ofproto/ofproto.c
+@@ -4806,6 +4806,7 @@ put_queue_stats(struct queue_stats_cbdata *cbdata, uint32_t queue_id,
+     oqs.tx_bytes = stats->tx_bytes;
+     oqs.tx_packets = stats->tx_packets;
+     oqs.tx_errors = stats->tx_errors;
++    oqs.qlen = stats->qlen; /* @Shubham Tiwari - add qlen */
+     if (stats->created != LLONG_MIN) {
+         calc_duration(stats->created, cbdata->now,
+                       &oqs.duration_sec, &oqs.duration_nsec);
